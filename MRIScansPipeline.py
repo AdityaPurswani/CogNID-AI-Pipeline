@@ -205,7 +205,7 @@ class BatchProccessingImages(MRIScansPipeline):
             if not os.path.isfile(image_path):
                 return f"File not found: {image_path}"
             
-            registered_image_prefix = os.path.join(self.output, f"registered2/{patient_id}-{image_id}-")
+            registered_image_prefix = os.path.join(self.output, f"registered/{patient_id}-{image_id}-")
             registered_image_path = registered_image_prefix + "registered.nii.gz"
             
             # Skip processing if already registered
@@ -328,7 +328,7 @@ class ImageSegmenter(BatchProccessingImages):
             registered_mri_data = registered_mri_image.get_fdata()
             
             # Process filename
-            renamed_file_name = file.replace('.nii.gz-_warped.nii.gz', '')
+            renamed_file_name = file.replace('.nii.gz-_registered.nii.gz', '')
             
             # Determine which segmentations to perform
             segmentations = ['cortex', 'subcortex', 'mni'] if segmentation_type == 'all' else [segmentation_type]
@@ -682,23 +682,44 @@ if __name__ == "__main__":
     input = '../CogNIDImages'
     output = '../Output'
     registered = '../Output/registered'
+    
   
     mni_path = "../../ll/pkgs/fsl-data_standard-2208.0-0/data/standard/MNI152_T1_1mm_brain.nii.gz"
+    mri_pipeline = BatchProccessingImages(input, output, registered)
     segmenter = ImageSegmenter(registered, atlas_paths, output)
-    # segmenter.batch_segment_images(num_workers=8) 
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_hippocampus.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_hippocampus.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_caudate.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_caudate.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_thalamus.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID221-CogNID221-right_thalamus.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_amygdala.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_amygdala.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID221-CogNID221-left_cortex.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID221-CogNID221-right_cortex.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_lateral_ventricle.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_lateral_ventricle.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-left_putamen.nii.gz')
-    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_putamen.nii.gz')
+    feature_extractor = FeatureExtraction(input, atlas_paths, output)
+    mri_pipeline.batch_process_mri_images(mni_path, 4)
+    segmenter.batch_segment_images(num_workers=8)
+    segmenter.plot_segmented_img('../Output/registered/CogNID011-CogNID011.nii.gz-_registered.nii.gz', '../Output/segmented_subcortex/CogNID011-CogNID011-right_hippocampus.nii.gz')
+    segmenter.display_mri_image('../Output/CogNID004-CogNID004_2.nii.gz-brain_extracted.nii.gz')
+    feature_extractor.extract_features('../Output/segmented_subcortex', 'vol_subcortex.csv')
+    feature_extractor.extract_features('../Output/segmented_cortex', 'vol_cortex.csv')
+    feature_extractor.extract_features('../Output/segmented_mni', 'vol_mni.csv')
+
+    def merge_data(file1, file2, file3, output_file):
+        """
+        Merge the volumetric data from cortex, subcortex, MNI atlases.
+
+        Parameters:
+        file1: HOA subcortex volumetric feature file path
+        file2: HOA cortex volumetric feature file path
+        file3: MNI volumetric feature file path
+        output_file: File Path to save the merged data
+
+        Returns:
+        A pandas DataFrame containing the merged data based on MRI_ID.
+        """
+        # Load each CSV file into a DataFrame
+        df_subcortex = pd.read_csv(file1)
+        df_cortex = pd.read_csv(file2)
+        df_mni = pd.read_csv(file3)
+
+        # Merge the DataFrames on the MRI_ID column
+        merged_df = df_subcortex.merge(df_cortex, on='MRI_ID', how='outer')
+        merged_df = merged_df.merge(df_mni, on='MRI_ID', how='outer')
+        merged_df.to_excel(output_file, index=False)
+        
+        return merged_df
     
-    # segmenter.display_mri_image('../Output/registered/CogNID011-CogNID011.nii.gz-_warped.nii.gz')
+    merged_df = merge_data('vol_mni.csv', 'vol_cortex.csv', 'vol_subcortex.csv', 'cognid_scans_filtered.xlsx')
+        

@@ -19,6 +19,7 @@ import datasets
 from typing import List, Dict, Any
 import random
 from types import SimpleNamespace
+from IPython.core.display import display, HTML
 
 def set_seed(seed):
     """
@@ -523,7 +524,7 @@ class DementiaRiskAnalyzer:
         risk_level = 'Low'
         if risk_score >= 75:
             risk_level = 'High'
-        elif risk_score >= 40:
+        elif risk_score >= 45:
             risk_level = 'Moderate'
 
         return {
@@ -565,7 +566,7 @@ class DementiaRiskAnalyzer:
                     risk_level = 'Low'
                     if score >= 75:
                         risk_level = 'High'
-                    elif score >= 40:
+                    elif score >= 45:
                         risk_level = 'Moderate'
                     
                     results.append({
@@ -598,8 +599,6 @@ class RadiologyDataLoader:
         
         # Load wentingzhao/radiology
         zhao_dataset = datasets.load_dataset("wentingzhao/radiology")
-        
-        # Extract report texts from sft dataset
                 
         # Extract report texts from zhao dataset
         zhao_reports = []
@@ -648,7 +647,7 @@ class EnhancedDementiaRiskAnalyzer(DementiaRiskAnalyzer):
         super().__init__()
         self.data_loader = RadiologyDataLoader()
         
-    def train_with_radiology_data(self, validation_split=0.2, epochs=5, batch_size=8):
+    def train_with_radiology_data(self, validation_split=0.2, epochs=7, batch_size=8):
         """Train the model using radiology datasets"""
         # Load and preprocess datasets
         train_texts = self.data_loader.load_datasets()
@@ -659,33 +658,109 @@ class EnhancedDementiaRiskAnalyzer(DementiaRiskAnalyzer):
         
         return len(train_texts)
     
+    def analyze_report_with_full_highlighting(self, medical_report):
+        """
+        Analyze a medical report and highlight all text with a color gradient based on importance.
+        
+        Parameters:
+        medical_report (str): The full text of the medical report.
+        
+        Returns:
+        str: HTML string with highlighted text and a legend.
+        """
+        self.model.eval()
+
+        # Split the report into sentences
+        doc = self.initial_scorer.severity_analyzer.nlp(medical_report)
+        sentences = [sent.text for sent in doc.sents]
+
+        # Generate importance scores and color the text
+        score = 0
+        sent = 0
+        highlighted_html = ""
+        for sentence in sentences:
+            sent+=1
+            severity_score = self.initial_scorer.severity_analyzer.analyze_severity(sentence)
+            print(severity_score)
+            score+=severity_score
+            # Normalize score to 0–255 for gradient
+            normalized_score = int(severity_score * 255)
+            color = f"rgb({normalized_score}, 0, {255 - normalized_score})"
+            highlighted_html += f"<span style='background-color: {color}; padding: 2px; margin: 1px;'>{sentence}</span> "
+        print("Score", score/sent)
+        # Add a legend for color importance
+        legend_html = """
+        <div style="margin-top: 20px; text-align: center;">
+            <b>Importance Scale:</b>
+            <div style="margin-top: 5px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                <span>Less Important</span>
+                <div style="background: linear-gradient(to right, rgb(0, 0, 255), rgb(255, 0, 0)); width: 200px; height: 20px; border: 1px solid #ccc; border-radius: 4px;"></div>
+                <span>Important</span>
+            </div>
+        </div>
+        """
+
+        return highlighted_html + legend_html
     
-# Example usage
 if __name__ == "__main__":
     # Initialize the analyzer
     analyzer = EnhancedDementiaRiskAnalyzer()
 
+    # Load data
     data = pd.read_excel('./cognid.xlsx')
+    
+    # Extract study numbers (modify column name if needed)
+    if 'Study No.' in data.columns:
+        study_numbers = list(data['Study No.'])
+    else:
+        # Create study numbers based on index
+        study_numbers = [f"STUDY_{i+1}" for i in range(len(data))]
+    
+    # Extract reports
     reports = list(data['MRI full report '])
-    reports = [report for report in reports if isinstance(report, str) and report.strip()]
     
-    num_reports = analyzer.train(reports)
+    # Filter out empty reports and track corresponding study numbers
+    valid_reports = []
+    valid_study_numbers = []
     
+    for i, report in enumerate(reports):
+        if isinstance(report, str) and report.strip():
+            valid_reports.append(report)
+            valid_study_numbers.append(study_numbers[i])
+    print(len(valid_reports), len(valid_study_numbers))
+    print(valid_study_numbers)
+    # Train the model
+    num_reports = analyzer.train(valid_reports)
     # num_reports = analyzer.train_with_radiology_data()
-    
     print(f"\nTraining completed on {num_reports} reports")
-    # Example reports
-
-    result = analyzer.analyze_batch(reports)
-    high=0
-    low=0
-    medium=0
-    for i in result:
-        print(i)
-    print("High", high)
-    print("Low", low)
-    print("Medium", medium)
-    print("\nAnalysis Result:", result)
     
-    # Save the trained model
-    # analyzer.save_model("radiology_trained_model")
+    # Analyze reports
+    results = analyzer.analyze_batch(valid_reports)
+    
+    # Add study numbers to results
+    results['Study No.'] = valid_study_numbers
+    
+    # Select and reorder columns for output
+    output_df = results[['Study No.', 'risk_score', 'risk_level']]
+    
+    # Rename columns for clarity
+    output_df = output_df.rename(columns={
+        'risk_score': 'Risk_Score',
+        'risk_level': 'Risk_Level'
+    })
+    
+    # Save to CSV
+    output_xlsx_path = 'study_risk_scores.csv'
+    output_df.to_csv(output_xlsx_path, index=False)
+    
+    print(f"\nCSV file with study numbers and risk scores saved to: {output_xlsx_path}")
+    print("\nFirst few rows of the CSV:")
+    print(output_df.head())
+    
+    example_report = """Clinical Details: Short-term memory problem with semantic and nonsymmetric memory including visual and auditory. Fluent speech. FDG PET suggestive of SVP PA. Is there evidence of Alzheimer's or PPA. Findings: Previous imaging dated 23/5/2018 and 19/6/2015 has been reviewed. No intracranial haemorrhage, space-occupying lesion, acute infarction, hydrocephalus or restricted diffusion. No significant volume loss since previous imaging. No significant hippocampal atrophy. No significant perisylvian atrophy. No abnormal white matter lesions or significant small vessel disease. No evidence of siderosis on T2*GRE. Incidental long-standing empty sella. Conclusion: No acute intracranial abnormality. No significant change since previous imaging. No features supportive of an underlying neurodegenerative process. Recommendation: Correlation with cognitive tests as imaging can lag clinical progress.
+    """
+    # Analyze the report and display full highlighted text
+    result = analyzer.analyze_report_with_full_highlighting(example_report)
+    display(HTML(result))  # Display in a Jupyter Notebook
+    
+    
